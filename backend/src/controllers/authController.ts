@@ -90,7 +90,8 @@ export const loginUser = async (req: Request, res: Response) => {
       { expiresIn: "1d" }
     );
 
-    res.json({ token });
+    // ✅ Return role alongside token
+    res.json({ token, role: user.role });
 
   } catch (error) {
     console.error("loginUser error:", error);

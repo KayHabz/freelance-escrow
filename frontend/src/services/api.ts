@@ -9,7 +9,6 @@ if (process.env.NEXT_PUBLIC_API_URL) {
   const isPreview = host.endsWith(".app.github.dev");
   if (isPreview) {
     const proto = window.location.protocol;
-    // Replace the frontend port (3000) with the backend port (5000)
     const backendHost = host.replace("-3000.", "-5000.");
     baseURL = `${proto}//${backendHost}/api`;
   } else {
@@ -20,5 +19,26 @@ if (process.env.NEXT_PUBLIC_API_URL) {
 }
 
 const api = axios.create({ baseURL });
+
+// ✅ Attach JWT token to every request
+api.interceptors.request.use((config) => {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// ✅ Auto-redirect to login if token expires
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;
