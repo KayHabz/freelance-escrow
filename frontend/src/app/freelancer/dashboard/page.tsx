@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import api from "@/services/api";
 
 // ── Types ──────────────────────────────────────────────
@@ -72,6 +73,8 @@ const txnDirection = (type: string): "debit" | "credit" => {
 // ── Main Component ─────────────────────────────────────
 export default function FreelancerDashboard() {
 
+  const router = useRouter();
+
   const [balance, setBalance]             = useState<number | null>(null);
   const [openJobs, setOpenJobs]           = useState<Job[]>([]);
   const [assignedJobs, setAssignedJobs]   = useState<AssignedJob[]>([]);
@@ -85,6 +88,22 @@ export default function FreelancerDashboard() {
   // Feedback
   const [actionError, setActionError]     = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // ── Auth guard ───────────────────────────────────────
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    const role  = localStorage.getItem("role");
+    if (!token || role !== "freelancer") {
+      router.push("/login");
+    }
+  }, []);
+
+  // ── Logout ───────────────────────────────────────────
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    router.push("/login");
+  };
 
   // ── Fetch wallet balance ─────────────────────────────
   const fetchWallet = async () => {
@@ -199,7 +218,16 @@ export default function FreelancerDashboard() {
   return (
     <div className="p-10 space-y-8 max-w-4xl mx-auto">
 
-      <h1 className="text-3xl font-bold">Freelancer Dashboard</h1>
+      {/* ── Header with logout ── */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Freelancer Dashboard</h1>
+        <button
+          onClick={logout}
+          className="text-sm text-gray-500 border px-4 py-2 rounded hover:bg-gray-100"
+        >
+          Logout
+        </button>
+      </div>
 
       {/* Action feedback */}
       {actionError && (
@@ -411,7 +439,6 @@ export default function FreelancerDashboard() {
               key={txn.id}
               className="border rounded p-4 flex items-center justify-between"
             >
-              {/* Left — type + date */}
               <div className="space-y-1">
                 <TxnBadge type={txn.type} />
                 <p className="text-xs text-gray-400 mt-1">
@@ -424,8 +451,6 @@ export default function FreelancerDashboard() {
                   })}
                 </p>
               </div>
-
-              {/* Right — amount */}
               <p className={`font-bold text-lg ${
                 txnDirection(txn.type) === "credit"
                   ? "text-green-600"

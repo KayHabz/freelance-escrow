@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import api from "@/services/api";
 
 // ── Types ──────────────────────────────────────────────
@@ -50,9 +51,9 @@ const StatusBadge = ({ status }: { status: string }) => {
 // ── Transaction Badge ──────────────────────────────────
 const TxnBadge = ({ type }: { type: string }) => {
   const styles: Record<string, { label: string; colour: string }> = {
-    deposit:        { label: "Deposit",        colour: "bg-green-100 text-green-700"  },
+    deposit:        { label: "Deposit",        colour: "bg-green-100 text-green-700"   },
     escrow_funding: { label: "Escrow Funded",  colour: "bg-yellow-100 text-yellow-700" },
-    escrow_release: { label: "Escrow Release", colour: "bg-blue-100 text-blue-700"   },
+    escrow_release: { label: "Escrow Release", colour: "bg-blue-100 text-blue-700"    },
     refund:         { label: "Refund",         colour: "bg-purple-100 text-purple-700" },
   };
   const style = styles[type] ?? { label: type, colour: "bg-gray-100 text-gray-600" };
@@ -71,6 +72,8 @@ const txnDirection = (type: string): "debit" | "credit" => {
 
 // ── Main Component ─────────────────────────────────────
 export default function Dashboard() {
+
+  const router = useRouter();
 
   const [balance, setBalance]             = useState<number | null>(null);
   const [jobs, setJobs]                   = useState<Job[]>([]);
@@ -96,6 +99,22 @@ export default function Dashboard() {
   // Action feedback
   const [actionError, setActionError]     = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // ── Auth guard ───────────────────────────────────────
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    const role  = localStorage.getItem("role");
+    if (!token || role !== "client") {
+      router.push("/login");
+    }
+  }, []);
+
+  // ── Logout ───────────────────────────────────────────
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    router.push("/login");
+  };
 
   // ── Fetch wallet balance ─────────────────────────────
   const fetchWallet = async () => {
@@ -269,7 +288,16 @@ export default function Dashboard() {
   return (
     <div className="p-10 space-y-10 max-w-4xl mx-auto">
 
-      <h1 className="text-3xl font-bold">Client Dashboard</h1>
+      {/* ── Header with logout ── */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Client Dashboard</h1>
+        <button
+          onClick={logout}
+          className="text-sm text-gray-500 border px-4 py-2 rounded hover:bg-gray-100"
+        >
+          Logout
+        </button>
+      </div>
 
       {/* Action feedback */}
       {actionError && (
@@ -286,7 +314,6 @@ export default function Dashboard() {
       {/* ── Wallet & Top Up ── */}
       <div className="flex gap-6 flex-wrap">
 
-        {/* Balance */}
         <div className="border p-6 w-72 rounded shadow">
           <h2 className="text-lg font-semibold mb-2">Wallet Balance</h2>
           <p className="text-2xl font-bold">
@@ -294,7 +321,6 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Top Up */}
         <div className="border p-6 w-72 rounded shadow space-y-3">
           <h2 className="text-lg font-semibold">Top Up Wallet</h2>
 
@@ -419,7 +445,6 @@ export default function Dashboard() {
           {jobs.map((job) => (
             <div key={job.id} className="border rounded shadow p-5 space-y-3">
 
-              {/* Job header */}
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-lg">{job.title}</h3>
@@ -432,14 +457,12 @@ export default function Dashboard() {
                 Budget: <span className="font-bold">${Number(job.budget).toFixed(2)}</span>
               </p>
 
-              {/* Freelancer name */}
               {(job.status === "assigned" || job.status === "submitted") && job.freelancer_name && (
                 <p className="text-sm text-gray-600">
                   Freelancer: <span className="font-medium">{job.freelancer_name}</span>
                 </p>
               )}
 
-              {/* ── Actions per status ── */}
               <div className="flex gap-2 flex-wrap">
 
                 {job.status === "open" && (
@@ -489,7 +512,6 @@ export default function Dashboard() {
 
               </div>
 
-              {/* ── Applications list ── */}
               {expandedJob === job.id && (
                 <div className="mt-3 border-t pt-3 space-y-3">
                   <h4 className="font-semibold text-sm">Applications</h4>
@@ -550,7 +572,6 @@ export default function Dashboard() {
               key={txn.id}
               className="border rounded p-4 flex items-center justify-between"
             >
-              {/* Left — type + date */}
               <div className="space-y-1">
                 <TxnBadge type={txn.type} />
                 <p className="text-xs text-gray-400 mt-1">
@@ -563,8 +584,6 @@ export default function Dashboard() {
                   })}
                 </p>
               </div>
-
-              {/* Right — amount */}
               <p className={`font-bold text-lg ${
                 txnDirection(txn.type) === "credit"
                   ? "text-green-600"

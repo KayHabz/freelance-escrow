@@ -12,45 +12,48 @@ export const depositFunds = async (req: Request, res: Response) => {
     const userId = (req as any).user.userId;
     const { amount } = req.body;
 
-    if (amount <= 0) {
-      return res.status(400).json({ message: "Invalid amount" });
+    // ✅ Validate amount is a positive number
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
+
+    // ✅ Cap deposit at a sane maximum to prevent overflow/abuse
+    if (Number(amount) > 1_000_000) {
+      return res.status(400).json({ message: "Deposit amount exceeds maximum allowed" });
     }
 
     await client.query("BEGIN");
 
-    // Get wallet
     const walletResult = await client.query(
       `SELECT * FROM wallets WHERE user_id = $1`,
       [userId]
     );
 
     const wallet = walletResult.rows[0];
-
     if (!wallet) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ message: "Wallet not found" });
     }
 
-    // Update balance
     const updatedWallet = await client.query(
       `UPDATE wallets
        SET balance = balance + $1
        WHERE id = $2
        RETURNING balance`,
-      [amount, wallet.id]
+      [Number(amount), wallet.id]
     );
 
-    // Log transaction
     await client.query(
       `INSERT INTO transactions (wallet_id, type, amount)
        VALUES ($1, $2, $3)`,
-      [wallet.id, "deposit", amount]
+      [wallet.id, "deposit", Number(amount)]
     );
 
     await client.query("COMMIT");
 
     res.json({
       message: "Deposit successful",
-      balance: updatedWallet.rows[0].balance
+      balance: updatedWallet.rows[0].balance,
     });
 
   } catch (error) {
@@ -95,7 +98,6 @@ export const getTransactions = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
 
-    // Get wallet
     const walletResult = await pool.query(
       `SELECT id FROM wallets WHERE user_id = $1`,
       [userId]
@@ -107,7 +109,6 @@ export const getTransactions = async (req: Request, res: Response) => {
 
     const walletId = walletResult.rows[0].id;
 
-    // Fetch transactions
     const transactionsResult = await pool.query(
       `SELECT id, type, amount, created_at
        FROM transactions
