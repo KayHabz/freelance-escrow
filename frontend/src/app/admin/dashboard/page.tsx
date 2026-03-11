@@ -11,6 +11,8 @@ interface Stats {
   jobsByStatus: Record<string, number>;
   totalEscrowVolume: number;
   totalReleased: number;
+  totalPlatformFees: number;
+  platformFeePercent: number;
 }
 
 interface Job {
@@ -44,6 +46,7 @@ const TxnBadge = ({ type }: { type: string }) => {
     escrow_funding: { label: "Escrow Funded",  colour: "bg-yellow-100 text-yellow-700" },
     escrow_release: { label: "Escrow Release", colour: "bg-blue-100 text-blue-700"    },
     refund:         { label: "Refund",         colour: "bg-purple-100 text-purple-700" },
+    platform_fee:   { label: "Platform Fee",   colour: "bg-gray-100 text-gray-700"    },
   };
   const style = styles[type] ?? { label: type, colour: "bg-gray-100 text-gray-600" };
   return (
@@ -105,21 +108,21 @@ export default function AdminDashboard() {
   }, []);
 
   // ── Fetchers ─────────────────────────────────────────
-  const fetchStats        = async () => {
+  const fetchStats = async () => {
     try {
       const res = await adminApi.get("/admin/stats");
       setStats(res.data);
     } catch (err) { console.error(err); }
   };
 
-  const fetchJobs         = async () => {
+  const fetchJobs = async () => {
     try {
       const res = await adminApi.get("/admin/jobs");
       setJobs(res.data);
     } catch (err) { console.error(err); }
   };
 
-  const fetchDisputes     = async () => {
+  const fetchDisputes = async () => {
     try {
       const res = await adminApi.get("/admin/disputes");
       setDisputes(res.data);
@@ -140,7 +143,6 @@ export default function AdminDashboard() {
     fetchTransactions();
   }, []);
 
-  // Refresh on tab switch
   useEffect(() => {
     if (activeTab === "overview")     fetchStats();
     if (activeTab === "jobs")         fetchJobs();
@@ -230,7 +232,7 @@ export default function AdminDashboard() {
       {activeTab === "overview" && stats && (
         <div className="space-y-6">
 
-          {/* Stat cards */}
+          {/* ── Row 1: Core stats ── */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="border rounded shadow p-5">
               <p className="text-xs text-gray-500 uppercase tracking-wide">Total Users</p>
@@ -250,7 +252,33 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Jobs by status */}
+          {/* ── Row 2: Revenue ── */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="border rounded shadow p-5 bg-black text-white">
+              <p className="text-xs uppercase tracking-wide opacity-60">Platform Revenue</p>
+              <p className="text-3xl font-bold mt-1">
+                ${stats.totalPlatformFees.toFixed(2)}
+              </p>
+              <p className="text-xs opacity-50 mt-1">
+                {stats.platformFeePercent}% fee on all released escrows
+              </p>
+            </div>
+            <div className="border rounded shadow p-5">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Fee per Job</p>
+              <p className="text-3xl font-bold mt-1">
+                ${
+                  stats.totalReleased > 0
+                    ? (stats.totalPlatformFees / (stats.jobsByStatus["released"] ?? 1)).toFixed(2)
+                    : "0.00"
+                }
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Across {stats.jobsByStatus["released"] ?? 0} completed job{stats.jobsByStatus["released"] === 1 ? "" : "s"}
+              </p>
+            </div>
+          </div>
+
+          {/* ── Jobs by status ── */}
           <div className="border rounded shadow p-5 space-y-3">
             <h2 className="font-semibold">Jobs by Status</h2>
             <div className="flex flex-wrap gap-3">
@@ -323,7 +351,11 @@ export default function AdminDashboard() {
                 <span>Freelancer: <span className="font-medium">{dispute.freelancer_name ?? "—"}</span></span>
               </div>
 
-              {/* Resolution buttons */}
+              {/* Fee notice */}
+              <p className="text-xs text-gray-500">
+                Note: a {stats?.platformFeePercent ?? 10}% platform fee will apply if resolved in favour of the freelancer.
+              </p>
+
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={() => resolveDispute(dispute.id, "freelancer")}
