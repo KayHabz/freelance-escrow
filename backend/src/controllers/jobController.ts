@@ -43,14 +43,16 @@ export const createJob = async (req: Request, res: Response) => {
 };
 
 // ----------------------------
-// Get All Open Jobs
+// Get All Funded Jobs (visible to freelancers)
+// ✅ Changed: status = 'funded' so freelancers only
+//    see jobs where escrow is already secured
 // ----------------------------
 export const getJobs = async (req: Request, res: Response) => {
   try {
     const pool = await poolPromise;
 
     const result = await pool.query(
-      `SELECT * FROM jobs WHERE status = 'open' ORDER BY created_at DESC`
+      `SELECT * FROM jobs WHERE status = 'funded' ORDER BY created_at DESC`
     );
 
     res.json(result.rows);
@@ -132,7 +134,6 @@ export const getJobApplications = async (req: Request, res: Response) => {
       return res.status(403).json({ message: "Only clients can view applications" });
     }
 
-    // Verify job belongs to this client
     const jobResult = await pool.query(
       `SELECT * FROM jobs WHERE id = $1 AND client_id = $2`,
       [jobId, clientId]
@@ -161,6 +162,7 @@ export const getJobApplications = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Apply to Job (Freelancer only)
+// ✅ Changed: accepts applications on 'funded' jobs
 // ----------------------------
 export const applyToJob = async (req: Request, res: Response) => {
   try {
@@ -188,8 +190,11 @@ export const applyToJob = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    if (job.status !== "open") {
-      return res.status(400).json({ message: `Job is not open for applications (status: ${job.status})` });
+    // ✅ Only funded jobs accept applications
+    if (job.status !== "funded") {
+      return res.status(400).json({
+        message: `Job is not available for applications (status: ${job.status})`
+      });
     }
 
     if (job.client_id === freelancerId) {
