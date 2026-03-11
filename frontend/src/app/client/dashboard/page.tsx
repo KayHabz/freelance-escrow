@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/services/api";
+import Navbar from "@/components/Navbar";
 
 // ── Types ──────────────────────────────────────────────
 interface Job {
@@ -55,6 +56,7 @@ const TxnBadge = ({ type }: { type: string }) => {
     escrow_funding: { label: "Escrow Funded",  colour: "bg-yellow-100 text-yellow-700" },
     escrow_release: { label: "Escrow Release", colour: "bg-blue-100 text-blue-700"    },
     refund:         { label: "Refund",         colour: "bg-purple-100 text-purple-700" },
+    platform_fee:   { label: "Platform Fee",   colour: "bg-gray-100 text-gray-600"    },
   };
   const style = styles[type] ?? { label: type, colour: "bg-gray-100 text-gray-600" };
   return (
@@ -71,7 +73,7 @@ const txnDirection = (type: string): "debit" | "credit" => {
 };
 
 // ── Main Component ─────────────────────────────────────
-export default function Dashboard() {
+export default function ClientDashboard() {
 
   const router = useRouter();
 
@@ -104,9 +106,7 @@ export default function Dashboard() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     const role  = localStorage.getItem("role");
-    if (!token || role !== "client") {
-      router.push("/login");
-    }
+    if (!token || role !== "client") router.push("/login");
   }, []);
 
   // ── Logout ───────────────────────────────────────────
@@ -116,44 +116,33 @@ export default function Dashboard() {
     router.push("/login");
   };
 
-  // ── Fetch wallet balance ─────────────────────────────
+  // ── Fetchers ─────────────────────────────────────────
   const fetchWallet = async () => {
     try {
       const res = await api.get("/wallet/balance");
       setBalance(res.data.balance);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  // ── Fetch transactions ───────────────────────────────
   const fetchTransactions = async () => {
     try {
       const res = await api.get("/wallet/transactions");
       setTransactions(res.data.transactions);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  // ── Fetch client's jobs ──────────────────────────────
   const fetchJobs = async () => {
     try {
       const res = await api.get("/jobs/my-jobs");
       setJobs(res.data);
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  // ── Fetch applications for a job ─────────────────────
   const fetchApplications = async (jobId: number) => {
     try {
       const res = await api.get(`/jobs/${jobId}/applications`);
       setApplications((prev) => ({ ...prev, [jobId]: res.data }));
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   useEffect(() => {
@@ -162,12 +151,11 @@ export default function Dashboard() {
     fetchTransactions();
   }, []);
 
-  // ── Refresh transactions when tab switches ───────────
   useEffect(() => {
     if (activeTab === "transactions") fetchTransactions();
   }, [activeTab]);
 
-  // ── Toggle job applications ──────────────────────────
+  // ── Toggle applications ──────────────────────────────
   const toggleApplications = (jobId: number) => {
     if (expandedJob === jobId) {
       setExpandedJob(null);
@@ -177,14 +165,12 @@ export default function Dashboard() {
     }
   };
 
-  // ── Deposit Funds ────────────────────────────────────
+  // ── Deposit ──────────────────────────────────────────
   const depositFunds = async () => {
     setDepositError(null);
     setDepositSuccess(false);
-
     if (!depositAmount || isNaN(Number(depositAmount)) || Number(depositAmount) <= 0)
       return setDepositError("Enter a valid amount");
-
     setDepositLoading(true);
     try {
       await api.post("/wallet/deposit", { amount: Number(depositAmount) });
@@ -193,9 +179,7 @@ export default function Dashboard() {
       fetchWallet();
       fetchTransactions();
     } catch (err: any) {
-      setDepositError(
-        err?.response?.data?.message ?? err?.message ?? "Deposit failed"
-      );
+      setDepositError(err?.response?.data?.message ?? err?.message ?? "Deposit failed");
     } finally {
       setDepositLoading(false);
     }
@@ -205,12 +189,10 @@ export default function Dashboard() {
   const createJob = async () => {
     setCreateError(null);
     setCreateSuccess(false);
-
-    if (!title.trim()) return setCreateError("Job title is required");
+    if (!title.trim())       return setCreateError("Job title is required");
     if (!description.trim()) return setCreateError("Description is required");
     if (!budget || isNaN(Number(budget)) || Number(budget) <= 0)
       return setCreateError("A valid budget is required");
-
     setCreateLoading(true);
     try {
       await api.post("/jobs", {
@@ -218,17 +200,11 @@ export default function Dashboard() {
         description: description.trim(),
         budget: Number(budget),
       });
-
       setCreateSuccess(true);
-      setTitle("");
-      setDescription("");
-      setBudget("");
+      setTitle(""); setDescription(""); setBudget("");
       fetchJobs();
-
     } catch (err: any) {
-      setCreateError(
-        err?.response?.data?.message ?? err?.message ?? "Failed to create job"
-      );
+      setCreateError(err?.response?.data?.message ?? err?.message ?? "Failed to create job");
     } finally {
       setCreateLoading(false);
     }
@@ -236,368 +212,326 @@ export default function Dashboard() {
 
   // ── Fund Job ─────────────────────────────────────────
   const fundJob = async (jobId: number) => {
-    setActionError(null);
-    setActionSuccess(null);
+    setActionError(null); setActionSuccess(null);
     try {
       await api.post("/escrow/fund", { jobId });
-      setActionSuccess("Job funded successfully! Escrow is holding the funds.");
-      fetchWallet();
-      fetchJobs();
-      fetchTransactions();
+      setActionSuccess("Job funded! Escrow is holding the funds.");
+      fetchWallet(); fetchJobs(); fetchTransactions();
     } catch (err: any) {
-      setActionError(
-        err?.response?.data?.message ?? err?.message ?? "Failed to fund job"
-      );
+      setActionError(err?.response?.data?.message ?? err?.message ?? "Failed to fund job");
     }
   };
 
   // ── Accept Application ───────────────────────────────
   const acceptApplication = async (applicationId: number, jobId: number) => {
-    setActionError(null);
-    setActionSuccess(null);
+    setActionError(null); setActionSuccess(null);
     try {
       await api.post("/jobs/accept", { applicationId });
       setActionSuccess("Freelancer accepted! Job is now in progress.");
-      fetchJobs();
-      fetchApplications(jobId);
+      fetchJobs(); fetchApplications(jobId);
     } catch (err: any) {
-      setActionError(
-        err?.response?.data?.message ?? err?.message ?? "Failed to accept application"
-      );
+      setActionError(err?.response?.data?.message ?? err?.message ?? "Failed to accept application");
     }
   };
 
   // ── Approve Work ─────────────────────────────────────
   const approveJob = async (jobId: number) => {
-    setActionError(null);
-    setActionSuccess(null);
+    setActionError(null); setActionSuccess(null);
     try {
       await api.post("/jobs/approve", { jobId });
       setActionSuccess("Work approved! Escrow released to freelancer.");
-      fetchWallet();
-      fetchJobs();
-      fetchTransactions();
+      fetchWallet(); fetchJobs(); fetchTransactions();
     } catch (err: any) {
-      setActionError(
-        err?.response?.data?.message ?? err?.message ?? "Failed to approve job"
-      );
+      setActionError(err?.response?.data?.message ?? err?.message ?? "Failed to approve job");
     }
   };
 
   // ── Render ───────────────────────────────────────────
   return (
-    <div className="p-10 space-y-10 max-w-4xl mx-auto">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
 
-      {/* ── Header with logout ── */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Client Dashboard</h1>
-        <button
-          onClick={logout}
-          className="text-sm text-gray-500 border px-4 py-2 rounded hover:bg-gray-100"
-        >
-          Logout
-        </button>
-      </div>
+      <Navbar role="client" onLogout={logout} />
 
-      {/* Action feedback */}
-      {actionError && (
-        <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-3 rounded">
-          {actionError}
+      <div className="p-8 space-y-8 max-w-4xl mx-auto w-full">
+
+        {/* Action feedback */}
+        {actionError && (
+          <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-3 rounded">
+            {actionError}
+          </div>
+        )}
+        {actionSuccess && (
+          <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-3 rounded">
+            {actionSuccess}
+          </div>
+        )}
+
+        {/* ── Wallet & Top Up ── */}
+        <div className="flex gap-6 flex-wrap">
+
+          <div className="bg-white border rounded shadow p-6 w-72 space-y-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Wallet Balance</p>
+            <p className="text-3xl font-bold">
+              ${balance !== null ? Number(balance).toFixed(2) : "—"}
+            </p>
+          </div>
+
+          <div className="bg-white border rounded shadow p-6 w-72 space-y-3">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Top Up Wallet</p>
+            {depositError && (
+              <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-2 rounded">
+                {depositError}
+              </div>
+            )}
+            {depositSuccess && (
+              <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-2 rounded">
+                Funds added!
+              </div>
+            )}
+            <input
+              className="w-full border p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="Amount (e.g. 1000)"
+              type="number"
+              min="1"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && depositFunds()}
+            />
+            <button
+              onClick={depositFunds}
+              disabled={depositLoading}
+              className="w-full bg-black text-white p-2 rounded text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+            >
+              {depositLoading ? "Processing..." : "Add Funds"}
+            </button>
+          </div>
+
         </div>
-      )}
-      {actionSuccess && (
-        <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-3 rounded">
-          {actionSuccess}
-        </div>
-      )}
 
-      {/* ── Wallet & Top Up ── */}
-      <div className="flex gap-6 flex-wrap">
+        {/* ── Post a Job ── */}
+        <div className="bg-white border rounded shadow p-6 space-y-4 max-w-lg">
+          <h2 className="text-lg font-semibold">Post a New Job</h2>
 
-        <div className="border p-6 w-72 rounded shadow">
-          <h2 className="text-lg font-semibold mb-2">Wallet Balance</h2>
-          <p className="text-2xl font-bold">
-            ${balance !== null ? Number(balance).toFixed(2) : "Loading..."}
-          </p>
-        </div>
-
-        <div className="border p-6 w-72 rounded shadow space-y-3">
-          <h2 className="text-lg font-semibold">Top Up Wallet</h2>
-
-          {depositError && (
-            <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-3 rounded">
-              {depositError}
+          {createError && (
+            <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-2 rounded">
+              {createError}
             </div>
           )}
-          {depositSuccess && (
-            <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-3 rounded">
-              Funds added successfully!
+          {createSuccess && (
+            <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-2 rounded">
+              Job posted! Fund it below to open it to freelancers.
             </div>
           )}
 
-          <input
-            className="w-full border p-2 rounded"
-            placeholder="Amount (e.g. 1000)"
-            type="number"
-            min="1"
-            value={depositAmount}
-            onChange={(e) => setDepositAmount(e.target.value)}
-          />
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Job title</label>
+            <input
+              className="w-full border p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="e.g. Build a landing page"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Description</label>
+            <textarea
+              className="w-full border p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="Describe the work in detail..."
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Budget ($)</label>
+            <input
+              className="w-full border p-2 rounded text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              placeholder="e.g. 500"
+              type="number"
+              min="1"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+            />
+          </div>
           <button
-            onClick={depositFunds}
-            disabled={depositLoading}
-            className="w-full bg-black text-white p-2 rounded disabled:opacity-50"
+            onClick={createJob}
+            disabled={createLoading}
+            className="w-full bg-black text-white p-2 rounded text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
           >
-            {depositLoading ? "Processing..." : "Add Funds"}
+            {createLoading ? "Posting..." : "Post Job"}
           </button>
         </div>
 
-      </div>
-
-      {/* ── Create Job Form ── */}
-      <div className="border p-6 rounded shadow space-y-4 max-w-lg">
-        <h2 className="text-xl font-bold">Post a New Job</h2>
-
-        {createError && (
-          <div className="bg-red-50 border border-red-300 text-red-700 text-sm p-3 rounded">
-            {createError}
-          </div>
-        )}
-        {createSuccess && (
-          <div className="bg-green-50 border border-green-300 text-green-700 text-sm p-3 rounded">
-            Job posted! Fund it below to open it to freelancers.
-          </div>
-        )}
-
-        <input
-          className="w-full border p-2 rounded"
-          placeholder="Job Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          className="w-full border p-2 rounded"
-          placeholder="Description"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <input
-          className="w-full border p-2 rounded"
-          placeholder="Budget (e.g. 500)"
-          type="number"
-          min="1"
-          value={budget}
-          onChange={(e) => setBudget(e.target.value)}
-        />
-        <button
-          onClick={createJob}
-          disabled={createLoading}
-          className="w-full bg-black text-white p-2 rounded disabled:opacity-50"
-        >
-          {createLoading ? "Posting..." : "Post Job"}
-        </button>
-      </div>
-
-      {/* ── Tabs ── */}
-      <div className="flex gap-4 border-b">
-        <button
-          onClick={() => setActiveTab("jobs")}
-          className={`pb-2 text-sm font-medium ${
-            activeTab === "jobs"
-              ? "border-b-2 border-black text-black"
-              : "text-gray-400 hover:text-black"
-          }`}
-        >
-          My Jobs
-          {jobs.length > 0 && (
-            <span className="ml-2 bg-black text-white text-xs px-2 py-0.5 rounded-full">
-              {jobs.length}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("transactions")}
-          className={`pb-2 text-sm font-medium ${
-            activeTab === "transactions"
-              ? "border-b-2 border-black text-black"
-              : "text-gray-400 hover:text-black"
-          }`}
-        >
-          Transaction History
-          {transactions.length > 0 && (
-            <span className="ml-2 bg-black text-white text-xs px-2 py-0.5 rounded-full">
-              {transactions.length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* ── My Jobs Tab ── */}
-      {activeTab === "jobs" && (
-        <div className="space-y-4">
-          {jobs.length === 0 && (
-            <p className="text-gray-500 text-sm">
-              No jobs yet. Post your first job above.
-            </p>
-          )}
-
-          {jobs.map((job) => (
-            <div key={job.id} className="border rounded shadow p-5 space-y-3">
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-lg">{job.title}</h3>
-                  <p className="text-sm text-gray-500">{job.description}</p>
-                </div>
-                <StatusBadge status={job.status} />
-              </div>
-
-              <p className="text-sm font-medium">
-                Budget: <span className="font-bold">${Number(job.budget).toFixed(2)}</span>
-              </p>
-
-              {(job.status === "assigned" || job.status === "submitted") && job.freelancer_name && (
-                <p className="text-sm text-gray-600">
-                  Freelancer: <span className="font-medium">{job.freelancer_name}</span>
-                </p>
-              )}
-
-              <div className="flex gap-2 flex-wrap">
-
-                {job.status === "open" && (
-                  <button
-                    onClick={() => fundJob(job.id)}
-                    className="bg-yellow-500 text-white text-sm px-4 py-2 rounded hover:bg-yellow-600"
-                  >
-                    Fund Escrow
-                  </button>
-                )}
-
-                {job.status === "funded" && (
-                  <button
-                    onClick={() => toggleApplications(job.id)}
-                    className="bg-blue-500 text-white text-sm px-4 py-2 rounded hover:bg-blue-600"
-                  >
-                    {expandedJob === job.id ? "Hide Applications" : "View Applications"}
-                  </button>
-                )}
-
-                {job.status === "assigned" && (
-                  <span className="text-purple-600 text-sm font-medium">
-                    ⏳ Waiting for freelancer to submit work
-                  </span>
-                )}
-
-                {job.status === "submitted" && (
-                  <button
-                    onClick={() => approveJob(job.id)}
-                    className="bg-green-600 text-white text-sm px-4 py-2 rounded hover:bg-green-700"
-                  >
-                    Approve & Release Payment
-                  </button>
-                )}
-
-                {job.status === "disputed" && (
-                  <span className="text-red-600 text-sm font-medium">
-                    ⚠ Dispute in progress — awaiting admin resolution
-                  </span>
-                )}
-
-                {job.status === "released" && (
-                  <span className="text-green-600 text-sm font-medium">
-                    ✓ Completed & paid
-                  </span>
-                )}
-
-              </div>
-
-              {expandedJob === job.id && (
-                <div className="mt-3 border-t pt-3 space-y-3">
-                  <h4 className="font-semibold text-sm">Applications</h4>
-
-                  {!applications[job.id] && (
-                    <p className="text-sm text-gray-400">Loading...</p>
-                  )}
-
-                  {applications[job.id]?.length === 0 && (
-                    <p className="text-sm text-gray-400">No applications yet.</p>
-                  )}
-
-                  {applications[job.id]?.map((app) => (
-                    <div
-                      key={app.id}
-                      className="border rounded p-3 space-y-2 bg-gray-50"
-                    >
-                      {app.freelancer_name && (
-                        <p className="text-sm font-medium">{app.freelancer_name}</p>
-                      )}
-                      <p className="text-sm">
-                        <span className="font-medium">Proposal: </span>
-                        {app.proposal}
-                      </p>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-gray-500">
-                          Status: {app.status}
-                        </span>
-                        {app.status === "pending" && (
-                          <button
-                            onClick={() => acceptApplication(app.id, job.id)}
-                            className="bg-black text-white text-xs px-3 py-1 rounded hover:bg-gray-800"
-                          >
-                            Accept
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Transactions Tab ── */}
-      {activeTab === "transactions" && (
-        <div className="space-y-3">
-
-          {transactions.length === 0 && (
-            <p className="text-gray-500 text-sm">No transactions yet.</p>
-          )}
-
-          {transactions.map((txn) => (
-            <div
-              key={txn.id}
-              className="border rounded p-4 flex items-center justify-between"
+        {/* ── Tabs ── */}
+        <div className="flex gap-6 border-b">
+          {(["jobs", "transactions"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`pb-2 text-sm font-medium capitalize ${
+                activeTab === tab
+                  ? "border-b-2 border-black text-black"
+                  : "text-gray-400 hover:text-black"
+              }`}
             >
-              <div className="space-y-1">
-                <TxnBadge type={txn.type} />
-                <p className="text-xs text-gray-400 mt-1">
-                  {new Date(txn.created_at).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+              {tab === "jobs" ? "My Jobs" : "Transaction History"}
+              {tab === "jobs" && jobs.length > 0 && (
+                <span className="ml-2 bg-black text-white text-xs px-2 py-0.5 rounded-full">
+                  {jobs.length}
+                </span>
+              )}
+              {tab === "transactions" && transactions.length > 0 && (
+                <span className="ml-2 bg-black text-white text-xs px-2 py-0.5 rounded-full">
+                  {transactions.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ── My Jobs ── */}
+        {activeTab === "jobs" && (
+          <div className="space-y-4">
+            {jobs.length === 0 && (
+              <p className="text-gray-500 text-sm">No jobs yet. Post your first job above.</p>
+            )}
+
+            {jobs.map((job) => (
+              <div key={job.id} className="bg-white border rounded shadow p-5 space-y-3">
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-lg">{job.title}</h3>
+                    <p className="text-sm text-gray-500">{job.description}</p>
+                  </div>
+                  <StatusBadge status={job.status} />
+                </div>
+
+                <p className="text-sm">
+                  Budget: <span className="font-bold">${Number(job.budget).toFixed(2)}</span>
+                </p>
+
+                {(job.status === "assigned" || job.status === "submitted") && job.freelancer_name && (
+                  <p className="text-sm text-gray-600">
+                    Freelancer: <span className="font-medium">{job.freelancer_name}</span>
+                  </p>
+                )}
+
+                <div className="flex gap-2 flex-wrap">
+                  {job.status === "open" && (
+                    <button
+                      onClick={() => fundJob(job.id)}
+                      className="bg-yellow-500 text-white text-sm px-4 py-2 rounded hover:bg-yellow-600"
+                    >
+                      Fund Escrow
+                    </button>
+                  )}
+
+                  {job.status === "funded" && (
+                    <button
+                      onClick={() => toggleApplications(job.id)}
+                      className="bg-blue-500 text-white text-sm px-4 py-2 rounded hover:bg-blue-600"
+                    >
+                      {expandedJob === job.id ? "Hide Applications" : "View Applications"}
+                    </button>
+                  )}
+
+                  {job.status === "assigned" && (
+                    <span className="text-purple-600 text-sm font-medium">
+                      ⏳ Waiting for freelancer to submit work
+                    </span>
+                  )}
+
+                  {job.status === "submitted" && (
+                    <button
+                      onClick={() => approveJob(job.id)}
+                      className="bg-green-600 text-white text-sm px-4 py-2 rounded hover:bg-green-700"
+                    >
+                      Approve & Release Payment
+                    </button>
+                  )}
+
+                  {job.status === "disputed" && (
+                    <span className="text-red-600 text-sm font-medium">
+                      ⚠ Dispute in progress — awaiting admin resolution
+                    </span>
+                  )}
+
+                  {job.status === "released" && (
+                    <span className="text-green-600 text-sm font-medium">
+                      ✓ Completed & paid
+                    </span>
+                  )}
+                </div>
+
+                {expandedJob === job.id && (
+                  <div className="border-t pt-3 space-y-3">
+                    <h4 className="font-semibold text-sm">Applications</h4>
+
+                    {!applications[job.id] && (
+                      <p className="text-sm text-gray-400">Loading...</p>
+                    )}
+                    {applications[job.id]?.length === 0 && (
+                      <p className="text-sm text-gray-400">No applications yet.</p>
+                    )}
+
+                    {applications[job.id]?.map((app) => (
+                      <div key={app.id} className="border rounded p-3 space-y-2 bg-gray-50">
+                        {app.freelancer_name && (
+                          <p className="text-sm font-medium">{app.freelancer_name}</p>
+                        )}
+                        <p className="text-sm">
+                          <span className="font-medium">Proposal: </span>{app.proposal}
+                        </p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">Status: {app.status}</span>
+                          {app.status === "pending" && (
+                            <button
+                              onClick={() => acceptApplication(app.id, job.id)}
+                              className="bg-black text-white text-xs px-3 py-1 rounded hover:bg-gray-800"
+                            >
+                              Accept
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Transactions ── */}
+        {activeTab === "transactions" && (
+          <div className="space-y-3">
+            {transactions.length === 0 && (
+              <p className="text-gray-500 text-sm">No transactions yet.</p>
+            )}
+            {transactions.map((txn) => (
+              <div key={txn.id} className="bg-white border rounded p-4 flex items-center justify-between">
+                <div className="space-y-1">
+                  <TxnBadge type={txn.type} />
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(txn.created_at).toLocaleDateString("en-GB", {
+                      day: "numeric", month: "short", year: "numeric",
+                      hour: "2-digit", minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+                <p className={`font-bold text-lg ${
+                  txnDirection(txn.type) === "credit" ? "text-green-600" : "text-red-600"
+                }`}>
+                  {txnDirection(txn.type) === "credit" ? "+" : "-"}${Number(txn.amount).toFixed(2)}
                 </p>
               </div>
-              <p className={`font-bold text-lg ${
-                txnDirection(txn.type) === "credit"
-                  ? "text-green-600"
-                  : "text-red-600"
-              }`}>
-                {txnDirection(txn.type) === "credit" ? "+" : "-"}
-                ${Number(txn.amount).toFixed(2)}
-              </p>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
 
-        </div>
-      )}
-
+      </div>
     </div>
   );
 }
