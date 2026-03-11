@@ -18,7 +18,6 @@ export const fundJob = async (req: Request, res: Response) => {
 
     await client.query("BEGIN");
 
-    // Get job
     const jobResult = await client.query(
       `SELECT * FROM jobs WHERE id = $1`,
       [jobId]
@@ -30,13 +29,11 @@ export const fundJob = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    // ✅ Verify job belongs to the calling client
     if (job.client_id !== userId) {
       await client.query("ROLLBACK");
       return res.status(403).json({ message: "You do not own this job" });
     }
 
-    // ✅ Prevent double funding
     const existingEscrow = await client.query(
       `SELECT id FROM escrows WHERE job_id = $1`,
       [jobId]
@@ -46,7 +43,6 @@ export const fundJob = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Job is already funded" });
     }
 
-    // ✅ Verify job is in a fundable state
     if (job.status !== "open") {
       await client.query("ROLLBACK");
       return res.status(400).json({ message: `Job cannot be funded in status: ${job.status}` });
@@ -54,7 +50,6 @@ export const fundJob = async (req: Request, res: Response) => {
 
     const amount = job.budget;
 
-    // Get client wallet
     const walletResult = await client.query(
       `SELECT * FROM wallets WHERE user_id = $1`,
       [userId]
@@ -66,13 +61,12 @@ export const fundJob = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Wallet not found" });
     }
 
-    // ✅ Check sufficient balance
     if (Number(wallet.balance) < Number(amount)) {
       await client.query("ROLLBACK");
       return res.status(400).json({ message: "Insufficient funds" });
     }
 
-    // Deduct client wallet balance
+    // Deduct client wallet
     await client.query(
       `UPDATE wallets SET balance = balance - $1 WHERE id = $2`,
       [amount, wallet.id]
@@ -85,7 +79,7 @@ export const fundJob = async (req: Request, res: Response) => {
       [jobId, userId, amount]
     );
 
-    // ✅ Update job status to funded
+    // Update job status
     await client.query(
       `UPDATE jobs SET status = 'funded' WHERE id = $1`,
       [jobId]
@@ -113,6 +107,7 @@ export const fundJob = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Release Escrow to Freelancer
+// ✅ Platform fee deducted from freelancer payout
 // ----------------------------
 export const releaseEscrow = async (req: Request, res: Response) => {
   const pool = await poolPromise;
@@ -128,7 +123,6 @@ export const releaseEscrow = async (req: Request, res: Response) => {
 
     await client.query("BEGIN");
 
-    // Get escrow
     const escrowResult = await client.query(
       `SELECT * FROM escrows WHERE id = $1`,
       [escrowId]
@@ -140,19 +134,16 @@ export const releaseEscrow = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Escrow not found" });
     }
 
-    // ✅ Verify caller is the client who funded this escrow
     if (escrow.client_id !== userId) {
       await client.query("ROLLBACK");
       return res.status(403).json({ message: "Only the client can release escrow" });
     }
 
-    // ✅ Prevent double release
     if (escrow.status === "released") {
       await client.query("ROLLBACK");
       return res.status(400).json({ message: "Escrow has already been released" });
     }
 
-    // Get job to find assigned freelancer
     const jobResult = await client.query(
       `SELECT * FROM jobs WHERE id = $1`,
       [escrow.job_id]
@@ -166,7 +157,6 @@ export const releaseEscrow = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "No freelancer assigned to this job" });
     }
 
-    // Get freelancer wallet
     const freelancerWallet = await client.query(
       `SELECT * FROM wallets WHERE user_id = $1`,
       [freelancerId]
@@ -178,10 +168,16 @@ export const releaseEscrow = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Freelancer wallet not found" });
     }
 
-    // Credit freelancer wallet
+    // ✅ Calculate platform fee
+    const feePercent  = Number(process.env.PLATFORM_FEE_PERCENT ?? 10);
+    const grossAmount = Number(escrow.amount);
+    const feeAmount   = parseFloat(((grossAmount * feePercent) / 100).toFixed(2));
+    const netAmount   = parseFloat((grossAmount - feeAmount).toFixed(2));
+
+    // Credit freelancer net amount
     await client.query(
       `UPDATE wallets SET balance = balance + $1 WHERE id = $2`,
-      [escrow.amount, wallet.id]
+      [netAmount, wallet.id]
     );
 
     // Mark escrow as released
@@ -190,17 +186,24 @@ export const releaseEscrow = async (req: Request, res: Response) => {
       [escrowId]
     );
 
-    // ✅ Update job status to released
+    // Update job status
     await client.query(
       `UPDATE jobs SET status = 'released' WHERE id = $1`,
       [escrow.job_id]
     );
 
-    // ✅ Log transaction for freelancer
+    // ✅ Log escrow_release for freelancer (net amount)
     await client.query(
       `INSERT INTO transactions (wallet_id, type, amount)
        VALUES ($1, $2, $3)`,
-      [wallet.id, "escrow_release", escrow.amount]
+      [wallet.id, "escrow_release", netAmount]
+    );
+
+    // ✅ Log platform_fee transaction against freelancer wallet
+    await client.query(
+      `INSERT INTO transactions (wallet_id, type, amount)
+       VALUES ($1, $2, $3)`,
+      [wallet.id, "platform_fee", feeAmount]
     );
 
     await client.query("COMMIT");

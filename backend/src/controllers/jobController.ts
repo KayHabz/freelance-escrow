@@ -44,8 +44,6 @@ export const createJob = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Get All Funded Jobs (visible to freelancers)
-// ✅ Changed: status = 'funded' so freelancers only
-//    see jobs where escrow is already secured
 // ----------------------------
 export const getJobs = async (req: Request, res: Response) => {
   try {
@@ -90,7 +88,6 @@ export const getJobById = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Get My Jobs (Client only)
-// ✅ JOIN with users to get freelancer_name
 // ----------------------------
 export const getMyJobs = async (req: Request, res: Response) => {
   try {
@@ -162,7 +159,6 @@ export const getJobApplications = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Apply to Job (Freelancer only)
-// ✅ Changed: accepts applications on 'funded' jobs
 // ----------------------------
 export const applyToJob = async (req: Request, res: Response) => {
   try {
@@ -190,7 +186,6 @@ export const applyToJob = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Job not found" });
     }
 
-    // ✅ Only funded jobs accept applications
     if (job.status !== "funded") {
       return res.status(400).json({
         message: `Job is not available for applications (status: ${job.status})`
@@ -375,6 +370,7 @@ export const completeJob = async (req: Request, res: Response) => {
 // ----------------------------
 // Approve Work (Client only)
 // submitted → released
+// ✅ Platform fee deducted from freelancer payout
 // ----------------------------
 export const approveJob = async (req: Request, res: Response) => {
   const pool = await poolPromise;
@@ -441,10 +437,16 @@ export const approveJob = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Freelancer wallet not found" });
     }
 
-    // Credit freelancer
+    // ✅ Calculate platform fee
+    const feePercent  = Number(process.env.PLATFORM_FEE_PERCENT ?? 10);
+    const grossAmount = Number(escrow.amount);
+    const feeAmount   = parseFloat(((grossAmount * feePercent) / 100).toFixed(2));
+    const netAmount   = parseFloat((grossAmount - feeAmount).toFixed(2));
+
+    // ✅ Credit freelancer net amount
     await client.query(
       `UPDATE wallets SET balance = balance + $1 WHERE id = $2`,
-      [escrow.amount, wallet.id]
+      [netAmount, wallet.id]
     );
 
     // Release escrow
@@ -459,16 +461,28 @@ export const approveJob = async (req: Request, res: Response) => {
       [jobId]
     );
 
-    // Log transaction
+    // ✅ Log escrow_release (net amount)
     await client.query(
       `INSERT INTO transactions (wallet_id, type, amount)
        VALUES ($1, $2, $3)`,
-      [wallet.id, "escrow_release", escrow.amount]
+      [wallet.id, "escrow_release", netAmount]
+    );
+
+    // ✅ Log platform_fee
+    await client.query(
+      `INSERT INTO transactions (wallet_id, type, amount)
+       VALUES ($1, $2, $3)`,
+      [wallet.id, "platform_fee", feeAmount]
     );
 
     await client.query("COMMIT");
 
-    res.json({ message: "Work approved. Escrow released to freelancer." });
+    res.json({
+      message: "Work approved. Escrow released to freelancer.",
+      grossAmount,
+      feeAmount,
+      netAmount,
+    });
 
   } catch (error) {
     await client.query("ROLLBACK");

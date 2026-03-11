@@ -23,7 +23,6 @@ export const adminLogin = async (req: Request, res: Response) => {
 
     const passwordMatch = await bcrypt.compare(password, adminPassword);
     if (!passwordMatch) {
-      // Also support plain-text password comparison for dev convenience
       if (password !== adminPassword) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
@@ -45,16 +44,18 @@ export const adminLogin = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Get Stats Overview
+// ✅ Added platform fees collected
 // ----------------------------
 export const getStats = async (req: Request, res: Response) => {
   try {
     const pool = await poolPromise;
 
-    const [users, jobs, escrow, transactions] = await Promise.all([
+    const [users, jobs, escrow, released, fees] = await Promise.all([
       pool.query(`SELECT COUNT(*) FROM users`),
       pool.query(`SELECT COUNT(*), status FROM jobs GROUP BY status`),
       pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM escrows`),
       pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE type = 'escrow_release'`),
+      pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM transactions WHERE type = 'platform_fee'`),
     ]);
 
     const jobsByStatus: Record<string, number> = {};
@@ -63,11 +64,13 @@ export const getStats = async (req: Request, res: Response) => {
     });
 
     res.json({
-      totalUsers:      Number(users.rows[0].count),
-      totalJobs:       jobs.rows.reduce((acc: number, r: any) => acc + Number(r.count), 0),
+      totalUsers:         Number(users.rows[0].count),
+      totalJobs:          jobs.rows.reduce((acc: number, r: any) => acc + Number(r.count), 0),
       jobsByStatus,
-      totalEscrowVolume: Number(escrow.rows[0].total),
-      totalReleased:     Number(transactions.rows[0].total),
+      totalEscrowVolume:  Number(escrow.rows[0].total),
+      totalReleased:      Number(released.rows[0].total),
+      totalPlatformFees:  Number(fees.rows[0].total),
+      platformFeePercent: Number(process.env.PLATFORM_FEE_PERCENT ?? 10),
     });
 
   } catch (error) {
@@ -131,7 +134,7 @@ export const getDisputes = async (req: Request, res: Response) => {
 
 // ----------------------------
 // Resolve Dispute
-// in_favour_of: "freelancer" | "client"
+// ✅ Platform fee applied when resolved in favour of freelancer
 // ----------------------------
 export const resolveDispute = async (req: Request, res: Response) => {
   const pool = await poolPromise;
@@ -150,7 +153,6 @@ export const resolveDispute = async (req: Request, res: Response) => {
 
     await client.query("BEGIN");
 
-    // Fetch job
     const jobResult = await client.query(
       `SELECT * FROM jobs WHERE id = $1 AND status = 'disputed'`,
       [jobId]
@@ -162,7 +164,6 @@ export const resolveDispute = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Disputed job not found" });
     }
 
-    // Fetch escrow
     const escrowResult = await client.query(
       `SELECT * FROM escrows WHERE job_id = $1 AND status = 'funded'`,
       [jobId]
@@ -174,11 +175,17 @@ export const resolveDispute = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Funded escrow not found for this job" });
     }
 
-    const recipientId = inFavourOf === "freelancer" ? job.freelancer_id : job.client_id;
-    const txnType     = inFavourOf === "freelancer" ? "escrow_release" : "refund";
+    const recipientId  = inFavourOf === "freelancer" ? job.freelancer_id : job.client_id;
     const newJobStatus = inFavourOf === "freelancer" ? "released" : "open";
+    const grossAmount  = Number(escrow.amount);
 
-    // Fetch recipient wallet
+    // ✅ Apply fee only when freelancer wins
+    const feePercent = Number(process.env.PLATFORM_FEE_PERCENT ?? 10);
+    const feeAmount  = inFavourOf === "freelancer"
+      ? parseFloat(((grossAmount * feePercent) / 100).toFixed(2))
+      : 0;
+    const netAmount  = parseFloat((grossAmount - feeAmount).toFixed(2));
+
     const walletResult = await client.query(
       `SELECT * FROM wallets WHERE user_id = $1`,
       [recipientId]
@@ -190,10 +197,10 @@ export const resolveDispute = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Recipient wallet not found" });
     }
 
-    // Credit recipient
+    // Credit recipient net amount
     await client.query(
       `UPDATE wallets SET balance = balance + $1 WHERE id = $2`,
-      [escrow.amount, wallet.id]
+      [netAmount, wallet.id]
     );
 
     // Release escrow
@@ -208,12 +215,22 @@ export const resolveDispute = async (req: Request, res: Response) => {
       [newJobStatus, jobId]
     );
 
-    // Log transaction
+    // Log escrow_release or refund
+    const txnType = inFavourOf === "freelancer" ? "escrow_release" : "refund";
     await client.query(
       `INSERT INTO transactions (wallet_id, type, amount)
        VALUES ($1, $2, $3)`,
-      [wallet.id, txnType, escrow.amount]
+      [wallet.id, txnType, netAmount]
     );
+
+    // ✅ Log platform_fee if freelancer wins
+    if (feeAmount > 0) {
+      await client.query(
+        `INSERT INTO transactions (wallet_id, type, amount)
+         VALUES ($1, $2, $3)`,
+        [wallet.id, "platform_fee", feeAmount]
+      );
+    }
 
     await client.query("COMMIT");
 
