@@ -20,9 +20,9 @@ if (process.env.NEXT_PUBLIC_API_URL) {
 
 const api = axios.create({ baseURL });
 
-// ✅ Attach JWT token to every request
+// ✅ Attach JWT token — but don't overwrite if already set (e.g. adminToken)
 api.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && !config.headers.Authorization) {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
   }
